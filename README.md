@@ -10,7 +10,9 @@ model.json ──► model-ffi (Rust, cdylib) ──UFFI──► ModelImporter 
                columns, no Famix knowledge         FM3 metamodel of the image
 ```
 
-Today it targets **FamixJava**. FamixTypeScript and FamixPython are planned (see
+Two entry points: from a `model.json` written by Model, or **straight from the
+sources, with no JSON at all** (the library builds the model in-process, see
+[Build from sources](#build-from-sources-no-json)). Today it targets **FamixJava**. FamixTypeScript and FamixPython are planned (see
 [Other languages](#other-languages)).
 
 ## Why
@@ -28,7 +30,11 @@ sites), same image, 3 runs each, after a garbage collection:
 | Moose JSON (`importFromJSONStream:`) | 8.7 s | 354 163 |
 | This importer (includes Rust reading `model.json`, reading sources, anchors) | 2.3 s | 350 602 |
 
-The JSON figure leaves out the Moose export itself (0.9 s of Rust) and re-reading
+From the sources in one call (`importSourcesAt:into:`, tree-sitter only, no file
+written) it takes 2.5 s, of which about 0.26 s is the Rust build: the Pharo side
+(about 2.2 s) is the same as from a `model.json`, so skipping the JSON saves the
+file and the separate build step rather than much time on a model this size. The
+JSON figure leaves out the Moose export itself (0.9 s of Rust) and re-reading
 the model to export it. The object counts differ slightly, see
 [Parity with the JSON import](#parity-with-the-json-import).
 
@@ -53,11 +59,14 @@ library name is the only platform-specific part) but are untested.
 ### 1. Build the native library
 
 ```bash
-cargo build --release -p model-ffi
+cargo build --release -p model-ffi                    # reads a model.json
+cargo build --release -p model-ffi --features build   # also builds from sources
 ```
 
 This produces `target/release/libmodel_ffi.dylib` (`.so` on Linux, `.dll` on
-Windows).
+Windows). The `build` feature is off by default: it pulls every language
+frontend (tree-sitter grammars, SCIP drivers) into the library (about 8 MB). Check
+at runtime with `ModelLibrary uniqueInstance hasBuild` (1 when available).
 
 ### 2. Load the Pharo package
 
@@ -83,7 +92,38 @@ ModelLibrary libraryPath: '/path/to/Model/target/release/libmodel_ffi.dylib'.
 ModelLibrary uniqueInstance abiVersion.   "→ 1"
 ```
 
+## Build from sources (no JSON)
+
+Needs a library compiled with `--features build`.
+
+```smalltalk
+| model importer |
+model := FamixJavaModel new.
+importer := ModelImporter new prefix: 'FamixJava'; yourself.
+importer importSourcesAt: '/path/to/sources' into: model.
+importer buildReport.   "→ '65381 entities, 77150 relations, 122140 sites'"
+```
+
+Defaults are tree-sitter only, no indexer run, no cache written. To choose:
+
+```smalltalk
+importer
+	importSourcesAt: '/path/to/sources'
+	into: model
+	scip: true            "use SCIP indexes"
+	reindex: 0            "0 never, 1 if missing, 2 if stale, 3 always"
+	languages: 'java'     "comma-separated, '' = all detected"
+	scope: 'src/main'     "comma-separated files or directories, '' = everything"
+```
+
+Anything but `reindex: 0` may run an indexer, that is the project's own build
+tool: your call, as for the CLI. The call **blocks the image** until the build is
+done and there is no progress callback yet. The build report carries the counts and
+the warnings.
+
 ## Produce a model
+
+Only needed to import from a file (see [Use](#use)).
 
 ```bash
 cargo run --release -p model-factory --example build -- /path/to/sources \
@@ -226,7 +266,7 @@ the JSON import. None of this has been tried yet.
 
 | Piece | Role |
 |---|---|
-| `crates/model-ffi` | C ABI over a frozen `Model`; depends on `model-core` only (and `serde_json` to open a `model.json`). Flat columns, string references, entity props as JSON, `model_char_offsets`. `unsafe` is confined to this crate. |
+| `crates/model-ffi` | C ABI over a frozen `Model`; depends on `model-core` only (and `serde_json` to open a `model.json`), plus `model-factory` behind the optional `build` feature (`model_build`, `model_build_report`). Flat columns, string references, entity props as JSON, `model_char_offsets`. `unsafe` is confined to this crate. |
 | `ModelLibrary` | UFFI binding (`FFILibrary`) and column readers: `uint32Column:count:`, `uint8Column:count:`, `stringColumn:count:`, `charOffsetsIn:ranges:`. |
 | `ModelImporter` | Reads all columns, then creates entities, links containers, creates associations, resolves anchors, adds everything with one `silentlyAddAll:`. |
 | `BaselineOfModelMooseImporter` | Metacello baseline. |
@@ -244,6 +284,11 @@ before calling `model_free`, so nothing native is kept alive.
   (`ModelLibrary>>uint32Column:count:`).
 - A crash of the image loses any class not saved: keep the Tonel sources in
   `pharo/src` as the source of truth.
+- **Do not overwrite the `.dylib` an image has loaded** (for example by rebuilding
+  into the same `target/release`): build into another directory
+  (`--target-dir`), set `ModelLibrary libraryPath:`, reset the singleton with
+  `ModelLibrary instVarNamed: 'uniqueInstance' put: nil` and recompile the methods
+  of the `ffi` protocol (or restart the image).
 - `ModelLibrary libraryPath:` must be set before the first call: the library name
   is read from it (`macLibraryName`, `unix64LibraryName`, `win32LibraryName`).
 - `ModelImporter>>importModelAt:into:sourceRoot:` signals an error with the
