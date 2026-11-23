@@ -31,7 +31,8 @@ Class {
 		'skipped',
 		'acceptCache',
 		'kindArchetypes',
-		'fileTypes'
+		'fileTypes',
+		'buildReport'
 	],
 	#category : 'Model-Moose-Importer',
 	#package : 'Model-Moose-Importer'
@@ -81,6 +82,13 @@ ModelImporter >> associationSpecFor: aKind from: from to: to [
 				     #interface ) ]
 				  ifFalse: [ #( 'Inheritance' #subclass #superclass ) ] ].
 	^ nil
+]
+
+{ #category : 'importing' }
+ModelImporter >> buildReport [
+	"Counts and warnings of the build when the model was built from sources, '' otherwise."
+
+	^ buildReport ifNil: [ '' ]
 ]
 
 { #category : 'importing' }
@@ -202,14 +210,15 @@ ModelImporter >> fileOf: anIndex [
 ]
 
 { #category : 'importing' }
-ModelImporter >> importModelAt: aPath into: aFamixModel sourceRoot: aRoot [
+ModelImporter >> importInto: aFamixModel sourceRoot: aRoot opening: aBlock [
 
 	| h |
 	lib := ModelLibrary uniqueInstance.
 	famixModel := aFamixModel.
 	sourceRoot := aRoot asFileReference.
-	h := lib open: aPath asString.
+	h := aBlock value: lib.
 	h isNull ifTrue: [ ^ self error: lib lastError ].
+	buildReport := lib buildReportOf: h.
 	[ self readColumns: h ] ensure: [ lib free: h ].
 	containerCache := Dictionary new.
 	skipped := Dictionary new.
@@ -223,6 +232,52 @@ ModelImporter >> importModelAt: aPath into: aFamixModel sourceRoot: aRoot [
 	self resolveAnchors.
 	famixModel silentlyAddAll: (entities select: #notNil) , associations.
 	^ self report
+]
+
+{ #category : 'importing' }
+ModelImporter >> importModelAt: aPath into: aFamixModel sourceRoot: aRoot [
+	"From a model.json written by Model."
+
+	^ self
+		  importInto: aFamixModel
+		  sourceRoot: aRoot
+		  opening: [ :library | library open: aPath asString ]
+]
+
+{ #category : 'importing' }
+ModelImporter >> importSourcesAt: aRoot into: aFamixModel [
+	"Builds the model of the sources in-process (tree-sitter only) and imports it: no JSON."
+
+	^ self
+		  importSourcesAt: aRoot
+		  into: aFamixModel
+		  scip: false
+		  reindex: 0
+		  languages: ''
+		  scope: ''
+]
+
+{ #category : 'importing' }
+ModelImporter >> importSourcesAt: aRoot into: aFamixModel scip: useScip reindex: aReindexCode languages: aLanguageList scope: aScopeList [
+	"As importSourcesAt:into:, choosing the build: useScip uses SCIP indexes; aReindexCode 0 never, 1 if missing, 2 if stale, 3 always (anything but 0 may run an indexer, i.e. the project's build tool); the lists are comma-separated, empty for all. The call blocks until the build is done."
+
+	| root |
+	root := aRoot asFileReference pathString.
+	^ self
+		  importInto: aFamixModel
+		  sourceRoot: root
+		  opening: [ :library |
+				  library hasBuild = 1 ifFalse: [
+						  self error:
+							  'libmodel_ffi was built without the build feature (cargo build --release -p model-ffi --features build)' ].
+				  library
+					  build: root
+					  scip: (useScip
+							   ifTrue: [ 1 ]
+							   ifFalse: [ 0 ])
+					  reindex: aReindexCode
+					  languages: aLanguageList
+					  scope: aScopeList ]
 ]
 
 { #category : 'importing' }

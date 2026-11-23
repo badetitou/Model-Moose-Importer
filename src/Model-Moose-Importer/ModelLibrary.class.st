@@ -1,5 +1,5 @@
 "
-UFFI binding to model-ffi (C ABI over a frozen Model).
+UFFI binding to model-ffi (C ABI over a frozen Model). Set ModelLibrary libraryPath: to the absolute path of libmodel_ffi.dylib / .so / .dll before use. hasBuild = 1 when the library was compiled with the build feature, which enables build:scip:reindex:languages:scope: (model from sources, no JSON).
 "
 Class {
 	#name : 'ModelLibrary',
@@ -26,6 +26,26 @@ ModelLibrary class >> libraryPath: aStringOrFileReference [
 { #category : 'ffi' }
 ModelLibrary >> abiVersion [
 	^ self ffiCall: #(uint32 model_abi_version ())
+]
+
+{ #category : 'ffi' }
+ModelLibrary >> build: aRoot scip: aScip reindex: aReindex languages: aLanguages scope: aScope [
+	"Builds the model of the sources under aRoot in-process (no JSON). Answers a handle, null on error. aScip: 0 tree-sitter only; aReindex: 0 never, 1 if missing, 2 if stale, 3 always; aLanguages and aScope: comma-separated, empty for all."
+	^ self ffiCall: #(void * model_build (String aRoot, uint32 aScip, uint32 aReindex, String aLanguages, String aScope))
+]
+
+{ #category : 'reading' }
+ModelLibrary >> buildReportOf: aHandle [
+	"Counts and warnings of a build, '' for a model opened from a file."
+
+	| lengthBytes pointer bytes length |
+	lengthBytes := ByteArray new: 4.
+	pointer := self primBuildReport: aHandle len: lengthBytes.
+	length := lengthBytes unsignedLongAt: 1.
+	length = 0 ifTrue: [ ^ '' ].
+	bytes := ByteArray new: length.
+	LibC memCopy: pointer to: bytes size: length.
+	^ bytes utf8Decoded
 ]
 
 { #category : 'reading' }
@@ -105,6 +125,12 @@ ModelLibrary >> free: aHandle [
 ]
 
 { #category : 'ffi' }
+ModelLibrary >> hasBuild [
+	"1 when the library was compiled with the build feature (model_build exists)."
+	^ self ffiCall: #(uint32 model_has_build ())
+]
+
+{ #category : 'ffi' }
 ModelLibrary >> kindArchetypes: aHandle [
 	^ self ffiCall: #(void * model_kind_archetypes (void * aHandle))
 ]
@@ -138,6 +164,11 @@ ModelLibrary >> macLibraryName [
 { #category : 'ffi' }
 ModelLibrary >> open: aPath [
 	^ self ffiCall: #(void * model_open (String aPath))
+]
+
+{ #category : 'ffi' }
+ModelLibrary >> primBuildReport: aHandle len: aBuffer [
+	^ self ffiCall: #(void * model_build_report (void * aHandle, void * aBuffer))
 ]
 
 { #category : 'ffi' }
