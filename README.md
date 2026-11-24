@@ -1,9 +1,11 @@
 # Model-Moose-Importer
 
-Loads a [Model](../README.md) into a Moose/Famix model **without going through JSON**.
+Loads a [Model](https://github.com/badetitou/Model) into a Moose/Famix model
+**without going through JSON**.
 The Rust side exposes the frozen `Model` as flat arrays (crate
-[`model-ffi`](../crates/model-ffi), a C ABI); the Pharo side reads them through
-UFFI and creates the Famix objects directly.
+[`model-ffi`](https://github.com/badetitou/Model/tree/main/crates/model-ffi), a
+C ABI); the Pharo side reads them through UFFI and creates the Famix objects
+directly.
 
 ```
 model.json ──► model-ffi (Rust, cdylib) ──UFFI──► ModelImporter ──► FamixJavaModel
@@ -46,8 +48,9 @@ read columns 171, create entities 182, containers 99, associations 768, anchors
 
 - A Pharo image with Moose: `MooseModel` (`Moose-Core`), the target Famix entities
   (`Famix-Java-Entities`) and UFFI. Developed on Pharo 13.1.
-- The native library `libmodel_ffi` built from this repository (Rust toolchain
-  pinned in `rust-toolchain.toml`).
+- The native library `libmodel_ffi`, built from the
+  [Model repository](https://github.com/badetitou/Model) (Rust toolchain pinned
+  in its `rust-toolchain.toml`).
 - A `model.json` produced by Model, and the source files it was built from (for
   source anchors).
 
@@ -58,13 +61,15 @@ library name is the only platform-specific part) but are untested.
 
 ### 1. Build the native library
 
+In the [Model checkout](https://github.com/badetitou/Model):
+
 ```bash
 cargo build --release -p model-ffi                    # reads a model.json
 cargo build --release -p model-ffi --features build   # also builds from sources
 ```
 
-This produces `target/release/libmodel_ffi.dylib` (`.so` on Linux, `.dll` on
-Windows). The `build` feature is off by default: it pulls every language
+It produces `target/release/libmodel_ffi.dylib` there (`.so` on Linux, `.dll`
+on Windows). The `build` feature is off by default: it pulls every language
 frontend (tree-sitter grammars, SCIP drivers) into the library (about 8 MB). Check
 at runtime with `ModelLibrary uniqueInstance hasBuild` (1 when available).
 
@@ -73,7 +78,7 @@ at runtime with `ModelLibrary uniqueInstance hasBuild` (1 when available).
 ```smalltalk
 Metacello new
 	baseline: 'ModelMooseImporter';
-	repository: 'github://badetitou/Model:main/pharo/src';
+	repository: 'github://badetitou/Model-Moose-Importer:main/src';
 	load.
 ```
 
@@ -131,7 +136,9 @@ cargo run --release -p model-factory --example build -- /path/to/sources \
 ```
 
 `--no-scip` builds from tree-sitter only; drop it to use existing SCIP indexes
-(relations are then compiler-grade). See `docs/usage.md` for the other options.
+(relations are then compiler-grade). See the
+[Model usage guide](https://github.com/badetitou/Model/blob/main/docs/usage.md)
+for the other options.
 
 ## Use
 
@@ -266,7 +273,7 @@ the JSON import. None of this has been tried yet.
 
 | Piece | Role |
 |---|---|
-| `crates/model-ffi` | C ABI over a frozen `Model`; depends on `model-core` only (and `serde_json` to open a `model.json`), plus `model-factory` behind the optional `build` feature (`model_build`, `model_build_report`). Flat columns, string references, entity props as JSON, `model_char_offsets`. `unsafe` is confined to this crate. |
+| [`crates/model-ffi`](https://github.com/badetitou/Model/tree/main/crates/model-ffi) | C ABI over a frozen `Model`; depends on `model-core` only (and `serde_json` to open a `model.json`), plus `model-factory` behind the optional `build` feature (`model_build`, `model_build_report`). Flat columns, string references, entity props as JSON, `model_char_offsets`. `unsafe` is confined to this crate. |
 | `ModelLibrary` | UFFI binding (`FFILibrary`) and column readers: `uint32Column:count:`, `uint8Column:count:`, `stringColumn:count:`, `charOffsetsIn:ranges:`. |
 | `ModelImporter` | Reads all columns, then creates entities, links containers, creates associations, resolves anchors, adds everything with one `silentlyAddAll:`. |
 | `BaselineOfModelMooseImporter` | Metacello baseline. |
@@ -283,7 +290,7 @@ before calling `model_free`, so nothing native is kept alive.
   crashed the image. Columns are copied with `LibC memCopy:to:size:` instead
   (`ModelLibrary>>uint32Column:count:`).
 - A crash of the image loses any class not saved: keep the Tonel sources in
-  `pharo/src` as the source of truth.
+  this repository's `src/` as the source of truth.
 - **Do not overwrite the `.dylib` an image has loaded** (for example by rebuilding
   into the same `target/release`): build into another directory
   (`--target-dir`), set `ModelLibrary libraryPath:`, reset the singleton with
@@ -296,11 +303,12 @@ before calling `model_free`, so nothing native is kept alive.
 
 ## Development
 
-- Tonel sources are in `pharo/src`; edit them in the image (the MCP Pharo tools
+- Tonel sources are in `src/`; edit them in the image (the MCP Pharo tools
   work) and export, or edit the files and reload.
 - Check parity after any change: import the same model with this importer and with
-  `Model → Moose JSON → importFromJSONStream:` (`cargo run -p model-moose
-  --release --example export -- <model.json> <out.json> --root <sources>`), then
-  compare counts per class, names, containers and anchors.
-- Rust side: `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D
-  warnings`, `cargo test --workspace`.
+  `Model → Moose JSON → importFromJSONStream:` (run `cargo run -p model-moose
+  --release --example export -- <model.json> <out.json> --root <sources>` in the
+  Model checkout), then compare counts per class, names, containers and anchors.
+- Rust side (in the Model checkout): `cargo fmt --check`,
+  `cargo clippy --workspace --all-targets -- -D warnings`,
+  `cargo test --workspace`.
